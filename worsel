@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+
+"""
+Usage:
+    worsel [-hnt TRIAL]
+    worsel -h
+    worsel -t <trial>
+Options:
+    -n --new                    Start a new game
+    -h --help                   Show this help
+    -t TRIAL --try TRIAL   Try this word
+
+"""
+import sys
+
+from rich import print
+from rich.text import Text
+from rich.console import Console
+from db import DB
+from console_display import *
+from wordle import compare_wordle
+import random
+from docopt import docopt
+
+
+# Press the green button in the gutter to run the script.
+if __name__ == '__main__':
+    # compare_wordle('оживо', 'божий')
+    db = DB()
+    d = Display()
+    try_num = 0
+    arguments = docopt(__doc__, version='worsel 0.1')
+    if arguments['--new'] and arguments['--new'] == 1:
+        # do we have a game in progress
+        if db.game_in_progress():
+            current_game_id = db.last_game_id()
+            db.game_mark_abandoned(current_game_id)
+
+        else:
+            pass
+        # chose the word
+        chosen_word = random.choice(db.candidate_words())
+        # start new game in db
+        gid = db.game_make_new(chosen_word)
+        db.set_game_in_progress(True)
+        d.print_blue("Начало новой игры")
+    elif arguments['--try']:
+        is_game = db.game_in_progress()
+        if not is_game:
+            print('ERROR: no game is in progress')
+            db.close()
+            sys.exit(1)
+        else:
+            # do we have tries left?
+            gid = db.last_game_id()
+            trial_count = db.trial_count_in_game(gid)
+            target_word = db.game_target_word(gid)
+            if trial_count == 6:
+                d.print_red("Извините, больше попыток не осталось.")
+                d.print_blue(f'{target_word}')
+                # todo need to mark game unsolved, etc.
+                db.close()
+                sys.exit(1)
+            trial = arguments['--try'][0]
+            if not db.word_in_dictionary(trial):
+                d.print_red("В словаре этого слова нет.")
+            else:
+                db.add_trial_in_game(gid, trial)
+            trials = db.trials_in_game(gid)
+            target_word = db.game_target_word(gid)
+            for t in trials:
+                comps = compare_wordle(t.word, target_word)
+                (chars, colours) = comps
+                d.show_line(chars, colours)
+            if trial_count == 5 and target_word != trial:
+                d.print_red("Извините, больше попыток не осталось.")
+                d.print_blue(f'{target_word}')
+                db.set_game_in_progress(False)
+                db.game_mark_solved(gid, False)
+                db.close()
+                sys.exit(1)
+            if trial == target_word:
+                d.print_blue("Ты угадал слово. Молодец!")
+                db.set_game_in_progress(False)
+                db.game_mark_solved(gid, True)
+    db.close()
